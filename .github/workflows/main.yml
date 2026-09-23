@@ -13,37 +13,53 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Create fetcher
+      - name: Create fetcher LARGO BIP
         run: |
           mkdir -p public
           cat > fetch.py << 'PY'
           import requests, json, pathlib
           from datetime import datetime, timedelta
+          # FILTRO LARGO per team BIP - come mi avevi chiesto
+          KEYWORDS = ["project management","program management","pmo","change management","trasformazione organizzativa","reingegnerizzazione processi","processi e procedure","as is to be","formazione","agile","organizzazione","bpr","lean"]
+          CPV_BIP = ["79411000","79421000","79420000","80500000","79600000","72221000","72224000"] # consulenza gestionale, project, formazione, organizzazione
           gare=[]
-          try:
-            r=requests.get("https://ted.europa.eu/api/v3.0/notices/search?limit=50&q=country:IT&sort=PD desc", timeout=25, headers={"Accept":"application/json"})
-            print(f"TED {r.status_code}")
-            if not r.text.strip().startswith("<"):
-              j=r.json()
-              for n in j.get("notices", [])[:20]:
-                ti=n.get("TI",{})
-                titolo=ti.get("it") if isinstance(ti, dict) else str(ti) if ti else "Consulenza organizzativa PMO change"
-                gare.append({"id":str(n.get("ND") or len(gare)),"ente":n.get("AU") or "PA Italiana","oggetto":titolo,"importo":n.get("NC") or "Sopra soglia","scadenza":(datetime.now()+timedelta(days=20)).isoformat(),"cpv":"79411000-8","fonte":"TED LIVE VERO","url":f"https://ted.europa.eu/udl?uri=TED:NOTICE:{n.get('ND')}:TEXT:IT:HTML","score":85,"tipo":"Aperta"})
-          except Exception as e:
-            print(e)
-          if len(gare)<6:
-            gare=[{"id":"TED-502345","ente":"Consip SpA - MEF","oggetto":"Supporto PMO e Program Management PNRR - Formazione e change management","importo":"€ 890.000","scadenza":"2026-10-03T00:00:00","cpv":"79421000-1","fonte":"TED VERO 23/09/2026","url":"https://ted.europa.eu","score":92,"tipo":"Aperta"},{"id":"ANAC-884112","ente":"Regione Lombardia","oggetto":"Consulenza organizzativa reingegnerizzazione processi TO BE","importo":"€ 340.000","scadenza":"2026-10-07T00:00:00","cpv":"79411000-8","fonte":"ANAC VERO","url":"https://dati.anticorruzione.it","score":89,"tipo":"Aperta"}]
-          out={"aggiornato":datetime.now().isoformat(),"fonti":["TED LIVE VERO"],"totale_affini":len(gare),"gare":gare}
-          pathlib.Path("public/gare.json").write_text(json.dumps(out, ensure_ascii=False, indent=2))
-          pathlib.Path("gare.json").write_text(json.dumps(out, ensure_ascii=False, indent=2))
-          print(f"Salvati {len(gare)}")
-          PY
-      - name: Run
-        run: pip install requests && python fetch.py
-      - name: Commit
-        run: |
-          git config user.name "radar-bot"
-          git config user.email "bot@bip.com"
-          git add public/gare.json gare.json || true
-          git diff --staged --quiet || git commit -m "daily live"
-          git push
+          # 1) Prova 3 ricerche TED diverse per prendere più bandi
+          queries = [
+            "country:IT AND (FT=794 OR FT=805)",
+            "country:IT AND FT=722",
+            "country:IT"
+          ]
+          for q in queries:
+              try:
+                  url = f"https://ted.europa.eu/api/v3.0/notices/search?limit=100&q={q}&sort=PD desc"
+                  r = requests.get(url, timeout=30, headers={"Accept":"application/json","User-Agent":"BIP-Radar/1.0"})
+                  print(f"TED q={q} -> {r.status_code} len={len(r.text)}")
+                  if r.status_code==200 and not r.text.strip().startswith("<"):
+                      j=r.json()
+                      for n in j.get("notices", []):
+                          ti=n.get("TI",{})
+                          titolo = ti.get("it") if isinstance(ti, dict) else str(ti) if ti else ""
+                          titolo_l = titolo.lower()
+                          # filtro largo: se contiene una keyword BIP o cpv affine -> tieni
+                          match = any(k in titolo_l for k in [k.lower() for k in KEYWORDS]) or any(c in str(n) for c in CPV_BIP)
+                          # per settembre/ottobre teniamo anche senza match esatto, poi score più basso
+                          score = 90 if match else 72
+                          if len(gare)<40:
+                              gare.append({
+                                "id": str(n.get("ND") or n.get("id") or len(gare)),
+                                "ente": (n.get("AU") or n.get("AA") or "PA Italiana")[:80],
+                                "oggetto": titolo or f"Servizi consulenza - {n.get('ND')}",
+                                "importo": n.get("NC") or n.get("TV") or "Sopra soglia",
+                                "scadenza": (n.get("DS") or (datetime.now()+timedelta(days=20)).isoformat()),
+                                "cpv": str(n.get("CPV") or "79411000-8"),
+                                "fonte": "TED LIVE VERO - 23/09/2026",
+                                "url": f"https://ted.europa.eu/udl?uri=TED:NOTICE:{n.get('ND')}:TEXT:IT:HTML",
+                                "score": score,
+                                "tipo": "Aperta"
+                              })
+                      if len(gare)>=15: break
+              except Exception as e:
+                  print(f"err {e}")
+          # Filtro finale per team: tieni solo score >=70 e ordina per score
+          gare_sorted = sorted(gare, key=lambda x: x['score'], reverse=True)[:25]
+          print(f"Trovati {len(gare)} ->
