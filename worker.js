@@ -1,25 +1,14 @@
-
 export default {
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-    if (url.pathname === "/api/gare" || url.pathname === "/gare.json") {
-      // Serve il file generato dalla GitHub Action
-      if (env.ASSETS) {
-        try {
-          // Prova a servire public/gare.json
-          const req = new Request(new URL("/gare.json", request.url).toString(), request);
-          const res = await env.ASSETS.fetch(req);
-          if (res.ok) return new Response(await res.text(), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Cache-Control": "no-cache" } });
-        } catch {}
-      }
-      // Fallback
-      return new Response(JSON.stringify({ gare: [], aggiornato: new Date().toISOString(), fonti: ["In attesa prima run GitHub Action"] }), { headers: { "Content-Type": "application/json" } });
-    }
-    if (env.ASSETS) return env.ASSETS.fetch(request);
-    return new Response("Not found", { status: 404 });
-  },
-  async scheduled(event, env, ctx) {
-    // Il cron vero è su GitHub Action alle 06:47, questo è solo warmup
-    ctx.waitUntil(fetch("https://radar-bandi.loris-passanti.workers.dev/api/gare").catch(()=>{}));
+  async fetch() {
+    const RAW = "https://raw.githubusercontent.com/loris-passanti-web/primo-segnale-bandi/main/public/gare.json";
+    let d = { gare: [], aggiornato: "", totale_affini: 0 };
+    try { d = await (await fetch(RAW, {cf:{cacheTtl:30}})).json(); } catch {}
+    const html = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Radar Bandi</title>
+    <style>body{font-family:system-ui;max-width:900px;margin:auto;padding:24px;background:#f8fafc} .card{border:1px solid #ddd;background:#fff;border-radius:16px;padding:16px;margin:12px 0}</style>
+    <h1>🎯 Radar Bandi BIP LIVE</h1>
+    <p>Aggiornato: ${d.aggiornato} - <b>${d.totale_affini} bandi affini</b> - filtro: PMO, change, processi TO BE, formazione, agile</p>
+    ${d.gare.map(g=>`<div class=card><b>${g.ente}</b><h3>${g.oggetto}</h3>${g.importo} - Scad ${g.scadenza} - Score ${g.score}<br><a href="${g.url}" target="_blank">Apri bando</a></div>`).join('')}
+    <p style="font-size:12px">Auto giornaliero 06:47 - no istituzione, solo TED pubblico</p>`;
+    return new Response(html, {headers:{"content-type":"text/html; charset=utf-8"}});
   }
-};
+}
