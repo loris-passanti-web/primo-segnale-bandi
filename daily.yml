@@ -1,0 +1,30 @@
+name: Radar Bandi - Daily LIVE
+on:
+  schedule:
+    - cron: '47 4 * * *'  # 06:47 CEST / 04:47 UTC
+  workflow_dispatch: {}
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: pip install requests python-dateutil
+      - name: Fetch bandi ANAC + TED
+        env:
+          ANAC_CLIENT_ID: ${{ secrets.ANAC_CLIENT_ID }}
+          ANAC_CLIENT_SECRET: ${{ secrets.ANAC_CLIENT_SECRET }}
+          TED_API_KEY: ${{ secrets.TED_API_KEY }}
+        run: python scripts/fetch_bandi.py
+      - name: Commit gare.json
+        run: |
+          git config user.name "radar-bot"
+          git config user.email "bot@bip.com"
+          git add public/gare.json public/gare_latest.json || true
+          git add gare.json || true
+          git diff --staged --quiet || git commit -m "feat: daily bandi LIVE $(date +'%Y-%m-%d %H:%M')"
+          git push
