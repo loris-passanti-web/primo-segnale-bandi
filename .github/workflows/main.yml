@@ -1,12 +1,20 @@
-# fetch.py - DB SOLIDO
-import requests, json, hashlib, pathlib, datetime
-KEYWORDS = {"pmo":25,"program management":25,"project management":25,"change management":20,"trasformazione organizzativa":20,"processi":20,"as is to be":20,"to be":15,"formazione":15,"agile":15,"organizzazione":10,"bpr":20,"lean":15}
-CPV_TARGET = ["79411000","79421000","80500000","72221000"]
-
-def score_bando(titolo):
-    s=50; tl=titolo.lower()
-    for k,v in KEYWORDS.items():
-        if k in tl: s+=v
-    return min(95,s)
-
-# ... fetch TED + ANAC con loop pagine, dedup, score, salva gare.json + xlsx
+name: Radar Bandi Reali - Daily 06:47
+on:
+  schedule:
+    - cron: '47 4 * * *'
+  workflow_dispatch:
+jobs:
+  scout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: pip install requests beautifulsoup4 lxml
+      - run: python scripts/fetch_real.py
+      - run: |
+          git config user.name "radar-bot"
+          git config user.email "bot@radar.local"
+          git add public/gare.json
+          git diff --staged --quiet || git commit -m "auto: bandi reali TED $(date -u +%F)"
+          git push
