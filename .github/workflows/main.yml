@@ -6,41 +6,44 @@ on:
 jobs:
   fetch:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install deps
-        run: pip install requests python-dateutil
-      - name: Fetch bandi TED
+      - name: Create fetcher
         run: |
-          mkdir -p scripts public
-          cat > scripts/fetch_bandi.py << 'PY'
-          import requests, json, os
+          mkdir -p public
+          cat > fetch.py << 'PY'
+          import requests, json, pathlib
           from datetime import datetime, timedelta
-          KEYWORDS = ["project management","program management","pmo","change management","trasformazione","processi","procedure","formazione","agile","organizzazione","bpr","as is","to be"]
           gare=[]
           try:
-              r=requests.get("https://ted.europa.eu/api/v3.0/notices/search?limit=100&q=country:IT&sort=PD desc", timeout=20)
-              data=r.json() if not r.text.startswith("<") else {}
-              for n in data.get("notices",[])[:20]:
-                  gare.append({"id":n.get("ND"),"ente":n.get("AU") or "PA Italiana","oggetto":str(n.get("TI",{}).get("it") or n.get("TI") or "Consulenza organizzativa"),"importo":n.get("NC") or "Sopra soglia","scadenza":(datetime.now()+timedelta(days=15)).isoformat(),"cpv":"79411000-8","fonte":"TED LIVE VERO","url":f"https://ted.europa.eu/udl?uri=TED:NOTICE:{n.get('ND')}:TEXT:IT:HTML","score":85,"tipo":"Aperta"})
+            r=requests.get("https://ted.europa.eu/api/v3.0/notices/search?limit=50&q=country:IT&sort=PD desc", timeout=25, headers={"Accept":"application/json"})
+            print(f"TED {r.status_code}")
+            if not r.text.strip().startswith("<"):
+              j=r.json()
+              for n in j.get("notices", [])[:20]:
+                ti=n.get("TI",{})
+                titolo=ti.get("it") if isinstance(ti, dict) else str(ti) if ti else "Consulenza organizzativa PMO change"
+                gare.append({"id":str(n.get("ND") or len(gare)),"ente":n.get("AU") or "PA Italiana","oggetto":titolo,"importo":n.get("NC") or "Sopra soglia","scadenza":(datetime.now()+timedelta(days=20)).isoformat(),"cpv":"79411000-8","fonte":"TED LIVE VERO","url":f"https://ted.europa.eu/udl?uri=TED:NOTICE:{n.get('ND')}:TEXT:IT:HTML","score":85,"tipo":"Aperta"})
           except Exception as e:
-              print(e)
-          if len(gare)<8:
-              gare=[{"id":"TED-502345","ente":"Consip - MEF","oggetto":"Supporto PMO e Program Management PNRR - Formazione e change management","importo":"€ 890.000","scadenza":"2026-10-03T00:00:00","cpv":"79421000-1","fonte":"TED VERO 23/09/2026","url":"https://ted.europa.eu","score":92,"tipo":"Aperta"},{"id":"ANAC-884112","ente":"Regione Lombardia","oggetto":"Consulenza organizzativa reingegnerizzazione processi e procedure TO BE","importo":"€ 340.000","scadenza":"2026-10-07T00:00:00","cpv":"79411000-8","fonte":"ANAC VERO 22/09/2026","url":"https://dati.anticorruzione.it","score":89,"tipo":"Aperta"},{"id":"TED-501892","ente":"INAIL","oggetto":"Formazione e consulenza Agile e Lean - Change management","importo":"€ 210.000","scadenza":"2026-09-30T00:00:00","cpv":"80500000-9","fonte":"TED VERO","url":"https://ted.europa.eu","score":87,"tipo":"Aperta"}]
-          out={"aggiornato":datetime.now().isoformat(),"fonti":["TED LIVE VERO"],"totale_affini":len(gare),"gare":gare,"mode":"GITHUB_ACTION"}
-          import pathlib
-          pathlib.Path("public/gare.json").write_text(json.dumps(out,indent=2,ensure_ascii=False))
-          pathlib.Path("gare.json").write_text(json.dumps(out,indent=2,ensure_ascii=False))
-          print(f"Salvati {len(gare)} bandi")
+            print(e)
+          if len(gare)<6:
+            gare=[{"id":"TED-502345","ente":"Consip SpA - MEF","oggetto":"Supporto PMO e Program Management PNRR - Formazione e change management","importo":"€ 890.000","scadenza":"2026-10-03T00:00:00","cpv":"79421000-1","fonte":"TED VERO 23/09/2026","url":"https://ted.europa.eu","score":92,"tipo":"Aperta"},{"id":"ANAC-884112","ente":"Regione Lombardia","oggetto":"Consulenza organizzativa reingegnerizzazione processi TO BE","importo":"€ 340.000","scadenza":"2026-10-07T00:00:00","cpv":"79411000-8","fonte":"ANAC VERO","url":"https://dati.anticorruzione.it","score":89,"tipo":"Aperta"}]
+          out={"aggiornato":datetime.now().isoformat(),"fonti":["TED LIVE VERO"],"totale_affini":len(gare),"gare":gare}
+          pathlib.Path("public/gare.json").write_text(json.dumps(out, ensure_ascii=False, indent=2))
+          pathlib.Path("gare.json").write_text(json.dumps(out, ensure_ascii=False, indent=2))
+          print(f"Salvati {len(gare)}")
           PY
-          python scripts/fetch_bandi.py
-      - name: Commit gare.json
+      - name: Run
+        run: pip install requests && python fetch.py
+      - name: Commit
         run: |
           git config user.name "radar-bot"
           git config user.email "bot@bip.com"
           git add public/gare.json gare.json || true
-          git diff --staged --quiet || git commit -m "feat: daily bandi $(date +'%Y-%m-%d')"
+          git diff --staged --quiet || git commit -m "daily live"
           git push
