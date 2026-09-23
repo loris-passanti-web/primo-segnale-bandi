@@ -8,6 +8,3 @@ crons = ["47 6 * * *"]
 [assets]
 directory = "./"
 not_found_handling = "single-page-application"
-
-[vars]
-APP_NAME = "Radar Bandi BIP"
